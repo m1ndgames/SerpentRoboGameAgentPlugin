@@ -7,6 +7,7 @@ from serpent.machine_learning.reinforcement_learning.ddqn import DDQN
 from serpent.machine_learning.reinforcement_learning.keyboard_mouse_action_space import KeyboardMouseActionSpace
 sprite_locator = SpriteLocator()
 import serpent.cv
+from serpent.visual_debugger.visual_debugger import VisualDebugger
 import time
 import cv2
 import os
@@ -16,6 +17,8 @@ import collections
 import numpy as np
 from .helpers.frame_processing import readhp
 from colorama import Fore, Back, Style
+from kivy import Config
+Config.set('graphics', 'multisamples', '0')
 
 class SerpentRoboGameAgent(GameAgent):
     def __init__(self, **kwargs):
@@ -69,7 +72,7 @@ class SerpentRoboGameAgent(GameAgent):
             fightinput_keys=[None, "J", "K", "L", "U", "I", "O"]
         )
 
-        movement_model_file_path = "datasets/skullgirls_movement_dqn_0_1_.h5".replace("/", os.sep)
+        movement_model_file_path = "datasets/fighting_movement_dqn_0_1_.h5".replace("/", os.sep)
         self.dqn_movement = DDQN(
             model_file_path=movement_model_file_path if os.path.isfile(movement_model_file_path) else None,
             input_shape=(100, 100, 4),
@@ -84,7 +87,7 @@ class SerpentRoboGameAgent(GameAgent):
             override_epsilon=False
         )
 
-        fightinput_model_file_path = "datasets/skullgirls_fightinput_dqn_0_1_.h5".replace("/", os.sep)
+        fightinput_model_file_path = "datasets/fighting_fightinput_dqn_0_1_.h5".replace("/", os.sep)
         self.dqn_fightinput = DDQN(
             model_file_path=fightinput_model_file_path if os.path.isfile(fightinput_model_file_path) else None,
             input_shape=(100, 100, 4),
@@ -98,17 +101,17 @@ class SerpentRoboGameAgent(GameAgent):
             final_epsilon=0.01,
             override_epsilon=False
         )
+        #print("Debug: Game Started")
 
     def handle_play(self, game_frame):
+        #print("Debug: Main")
         title_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_TITLE_TEXT'], game_frame=game_frame)
         menu_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_TEXT'], game_frame=game_frame)
         fightmenu_select_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTMENU_SELECT'], game_frame=game_frame)
-        levelselect_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_LEVELSELECT'], game_frame=game_frame)
         playerselect_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_PLAYERSELECT'], game_frame=game_frame)
         fightcheck_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTCHECK'], game_frame=game_frame)
         roundstart_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_ROUNDSTART'], game_frame=game_frame)
         retrybutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTMENU_RETRY'], game_frame=game_frame)
-        #fight_two_wins_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHT_TWO_WINS'], game_frame=game_frame)
 
         p1hp_frame = serpent.cv.extract_region_from_image(game_frame.frame, self.game.screen_regions["P1_HP"])
         p2hp_frame = serpent.cv.extract_region_from_image(game_frame.frame, self.game.screen_regions["P2_HP"])
@@ -116,23 +119,33 @@ class SerpentRoboGameAgent(GameAgent):
         self.game_state["health"].appendleft(self.p1hp)
         self.game_state["enemy_health"].appendleft(self.p2hp)
 
+        visual_debugger = VisualDebugger()
+        visual_debugger.store_image_data(
+            image_data = game_frame.frame,
+            image_shape = game_frame.frame.shape,
+            bucket = "0"
+        )
+
         if (roundstart_locator):
+            #print("Debug: roundstart_locator Locator")
             self.game_state["fightstarted"] = True
         elif (retrybutton_locator):
+            #print("Debug: retrybutton_locator Locator")
             self.handle_fight_end(game_frame)
-        #elif (fight_two_wins_locator):
-            #self.handle_fight_end(game_frame)
         elif (fightcheck_locator):
+            #print("Debug: fightcheck_locator Locator")
             self.handle_fight(game_frame)
         elif (title_locator):
+            #print("Debug: title_locator Locator")
             self.handle_menu_title(game_frame)
         elif (menu_locator):
+            #print("Debug: menu_locator Locator")
             self.handle_menu_select(game_frame)
-        elif (levelselect_locator):
-            self.handle_level_select(game_frame)
         elif (playerselect_locator):
+            #print("Debug: playerselect_locator Locator")
             self.handle_player_select(game_frame)
         elif ((fightmenu_select_locator) and (self.game_state["current_run"] != 1)):
+            #print("Debug: fightmenu_select_locator Locator")
             self.handle_fightmenu_select(game_frame)
         else:
             return
@@ -145,16 +158,11 @@ class SerpentRoboGameAgent(GameAgent):
     def handle_menu_title(self, game_frame):
         print("\tPressing Start")
         self.input_controller.tap_key(KeyboardKey.KEY_J)
-        time.sleep(1)
+        time.sleep(2)
 
     def handle_fightmenu_select(self, game_frame):
         self.input_controller.tap_key(KeyboardKey.KEY_J)
-        time.sleep(1)
-
-    def handle_level_select(self, game_frame):
-        print("\tStarting Game")
-        self.input_controller.tap_key(KeyboardKey.KEY_J)
-        time.sleep(1)
+        time.sleep(2)
 
     def handle_player_select(self, game_frame):
         print("\tPicking one Char")
@@ -176,7 +184,10 @@ class SerpentRoboGameAgent(GameAgent):
         self.input_controller.tap_key(KeyboardKey.KEY_S)
         time.sleep(1)
         self.input_controller.tap_key(KeyboardKey.KEY_J)
-        time.sleep(1)
+        time.sleep(2)
+        print("\tStarting Game")
+        self.input_controller.tap_key(KeyboardKey.KEY_J)
+        time.sleep(2)
 
     def handle_menu_select(self, game_frame):
         menu_selector = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_SINGLEPLAY'], game_frame=game_frame)
@@ -247,22 +258,22 @@ class SerpentRoboGameAgent(GameAgent):
                 # Every 2000 steps, save latest weights to disk
                 if self.dqn_movement.current_step % 2000 == 0:
                     self.dqn_movement.save_model_weights(
-                        file_path_prefix=f"datasets/skullgirls_movement"
+                        file_path_prefix=f"datasets/fighting_movement"
                     )
 
                     self.dqn_fightinput.save_model_weights(
-                        file_path_prefix=f"datasets/skullgirls_fightinput"
+                        file_path_prefix=f"datasets/fighting_fightinput"
                     )
 
                 # Every 20000 steps, save weights checkpoint to disk
                 if self.dqn_movement.current_step % 20000 == 0:
                     self.dqn_movement.save_model_weights(
-                        file_path_prefix=f"datasets/skullgirls_movement",
+                        file_path_prefix=f"datasets/fighting_movement",
                         is_checkpoint=True
                     )
 
                     self.dqn_fightinput.save_model_weights(
-                        file_path_prefix=f"datasets/skullgirls_fightinput",
+                        file_path_prefix=f"datasets/fighting_fightinput",
                         is_checkpoint=True
                     )
             elif self.dqn_movement.mode == "RUN":
@@ -356,6 +367,7 @@ class SerpentRoboGameAgent(GameAgent):
 
     def handle_fight_end(self, game_frame):
         self.game_state["fightstarted"] = None
+        self.input_controller.handle_keys([])
         self.game_state["current_run"] += 1
         if (self.game_state['current_run'] % 5 == 0):
             self.handle_fight_training(game_frame)
