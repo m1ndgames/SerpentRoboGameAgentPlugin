@@ -2,6 +2,7 @@ from serpent.game_agent import GameAgent
 from serpent.input_controller import KeyboardKey
 from serpent.sprite_locator import SpriteLocator
 from serpent.frame_grabber import FrameGrabber
+from serpent.config import config
 import serpent.utilities
 from serpent.machine_learning.reinforcement_learning.ddqn import DDQN
 from serpent.machine_learning.reinforcement_learning.keyboard_mouse_action_space import KeyboardMouseActionSpace
@@ -10,15 +11,19 @@ import serpent.cv
 from serpent.visual_debugger.visual_debugger import VisualDebugger
 import time
 import cv2
+import skimage.io
+import skimage.filters
+import skimage.morphology
+import skimage.measure
+import skimage.draw
+import skimage.segmentation
+import skimage.color
 import os
 import gc
 from datetime import datetime
 import collections
 import numpy as np
 from .helpers.frame_processing import readhp
-from colorama import Fore, Back, Style
-from kivy import Config
-Config.set('graphics', 'multisamples', '0')
 
 class SerpentRoboGameAgent(GameAgent):
     def __init__(self, **kwargs):
@@ -48,7 +53,12 @@ class SerpentRoboGameAgent(GameAgent):
             "L": [KeyboardKey.KEY_L],
             "U": [KeyboardKey.KEY_U],
             "I": [KeyboardKey.KEY_I],
-            "O": [KeyboardKey.KEY_O]
+            "O": [KeyboardKey.KEY_O],
+            "JU": [KeyboardKey.KEY_J, KeyboardKey.KEY_U],
+            "KI": [KeyboardKey.KEY_K, KeyboardKey.KEY_I],
+            "LO": [KeyboardKey.KEY_L, KeyboardKey.KEY_O],
+            "N": [KeyboardKey.KEY_N],
+            "M": [KeyboardKey.KEY_M]
         }
 
         self.key_mapping = {
@@ -61,7 +71,9 @@ class SerpentRoboGameAgent(GameAgent):
             KeyboardKey.KEY_L.name: "HARD PUNCH",
             KeyboardKey.KEY_U.name: "LIGHT KICK",
             KeyboardKey.KEY_I.name: "MEDIUM KICK",
-            KeyboardKey.KEY_O.name: "HARD KICK"
+            KeyboardKey.KEY_O.name: "HARD KICK",
+            KeyboardKey.KEY_N.name: "START",
+            KeyboardKey.KEY_M.name: "SELECT"
         }
 
         movement_action_space = KeyboardMouseActionSpace(
@@ -69,7 +81,7 @@ class SerpentRoboGameAgent(GameAgent):
         )
 
         fightinput_action_space = KeyboardMouseActionSpace(
-            fightinput_keys=[None, "J", "K", "L", "U", "I", "O"]
+            fightinput_keys=[None, "J", "K", "L", "U", "I", "O", "JU", "KI", "LO"]
         )
 
         movement_model_file_path = "datasets/fighting_movement_dqn_0_1_.h5".replace("/", os.sep)
@@ -101,7 +113,7 @@ class SerpentRoboGameAgent(GameAgent):
             final_epsilon=0.01,
             override_epsilon=False
         )
-        #print("Debug: Game Started")
+        print("Debug: Game Started")
 
     def handle_play(self, game_frame):
         #print("Debug: Main")
@@ -109,9 +121,11 @@ class SerpentRoboGameAgent(GameAgent):
         menu_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_TEXT'], game_frame=game_frame)
         fightmenu_select_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTMENU_SELECT'], game_frame=game_frame)
         playerselect_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_PLAYERSELECT'], game_frame=game_frame)
+        backbutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_BACKBUTTON'], game_frame=game_frame)
         fightcheck_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTCHECK'], game_frame=game_frame)
         roundstart_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_ROUNDSTART'], game_frame=game_frame)
         retrybutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTMENU_RETRY'], game_frame=game_frame)
+        backbutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_BACKBUTTON'], game_frame=game_frame)
 
         p1hp_frame = serpent.cv.extract_region_from_image(game_frame.frame, self.game.screen_regions["P1_HP"])
         p2hp_frame = serpent.cv.extract_region_from_image(game_frame.frame, self.game.screen_regions["P2_HP"])
@@ -119,12 +133,12 @@ class SerpentRoboGameAgent(GameAgent):
         self.game_state["health"].appendleft(self.p1hp)
         self.game_state["enemy_health"].appendleft(self.p2hp)
 
-        visual_debugger = VisualDebugger()
-        visual_debugger.store_image_data(
-            image_data = game_frame.frame,
-            image_shape = game_frame.frame.shape,
-            bucket = "0"
-        )
+        #visual_debugger = VisualDebugger()
+        #visual_debugger.store_image_data(
+            #image_data = game_frame.frame,
+            #image_shape = game_frame.frame.shape,
+            #bucket = "0"
+        #)
 
         if (roundstart_locator):
             #print("Debug: roundstart_locator Locator")
@@ -144,6 +158,9 @@ class SerpentRoboGameAgent(GameAgent):
         elif (playerselect_locator):
             #print("Debug: playerselect_locator Locator")
             self.handle_player_select(game_frame)
+        elif (backbutton_locator):
+            #print("Debug: backbutton_locator Locator")
+            self.handle_backbutton(game_frame)
         elif ((fightmenu_select_locator) and (self.game_state["current_run"] != 1)):
             #print("Debug: fightmenu_select_locator Locator")
             self.handle_fightmenu_select(game_frame)
@@ -151,12 +168,17 @@ class SerpentRoboGameAgent(GameAgent):
             return
 
     def handle_retry_button(self, game_frame):
-        print("\tPressing LP")
+        print("Pressing LP")
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(1)
 
+    def handle_backbutton(self, game_frame):
+        print("Pressing Select")
+        self.input_controller.tap_key(KeyboardKey.KEY_M)
+        time.sleep(1)
+
     def handle_menu_title(self, game_frame):
-        print("\tPressing Start")
+        print("Pressing Start")
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(2)
 
@@ -165,34 +187,34 @@ class SerpentRoboGameAgent(GameAgent):
         time.sleep(2)
 
     def handle_player_select(self, game_frame):
-        print("\tPicking one Char")
+        print("Picking one Char")
         self.input_controller.tap_key(KeyboardKey.KEY_A)
         time.sleep(1)
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(1)
-        print("\tChoosing Filia")
+        print("Choosing Filia")
         self.input_controller.tap_key(KeyboardKey.KEY_A)
         time.sleep(1)
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(1)
-        print("\tChoosing one CPU Char")
+        print("Choosing one CPU Char")
         self.input_controller.tap_key(KeyboardKey.KEY_A)
         time.sleep(1)
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(1)
-        print("\tChoosing Parasoul as CPU Char")
+        print("Choosing Parasoul as CPU Char")
         self.input_controller.tap_key(KeyboardKey.KEY_S)
         time.sleep(1)
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(2)
-        print("\tStarting Game")
+        print("Starting Game")
         self.input_controller.tap_key(KeyboardKey.KEY_J)
         time.sleep(2)
 
     def handle_menu_select(self, game_frame):
         menu_selector = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_SINGLEPLAY'], game_frame=game_frame)
         if (menu_selector):
-            print("\tStarting Singleplayer Mode")
+            print("Starting Singleplayer Mode")
             self.input_controller.tap_key(KeyboardKey.KEY_J)
             time.sleep(1)
             self.input_controller.tap_key(KeyboardKey.KEY_S)
@@ -283,32 +305,32 @@ class SerpentRoboGameAgent(GameAgent):
             run_time = datetime.now() - self.started_at
             serpent.utilities.clear_terminal()
             print("")
-            print(f"\tSESSION RUN TIME: {run_time.days} days, {run_time.seconds // 3600} hours, {(run_time.seconds // 60) % 60} minutes, {run_time.seconds % 60} seconds")
+            print(f"SESSION RUN TIME: {run_time.days} days, {run_time.seconds // 3600} hours, {(run_time.seconds // 60) % 60} minutes, {run_time.seconds % 60} seconds")
 
             print("")
-            print("\tMOVEMENT NEURAL NETWORK:\n")
+            print("MOVEMENT NEURAL NETWORK:\n")
             self.dqn_movement.output_step_data()
 
             print("")
-            print("\tFIGHT NEURAL NETWORK:\n")
+            print("FIGHT NEURAL NETWORK:\n")
             self.dqn_fightinput.output_step_data()
 
             print("")
-            print(f"\tCURRENT RUN: {self.game_state['current_run']}")
-            print(f"\tCURRENT RUN REWARD: {round(self.game_state['run_reward_movement'] + self.game_state['run_reward_fightinput'], 2)}")
-            print(f"\tCURRENT RUN PREDICTED ACTIONS: {self.game_state['run_predicted_actions']}")
-            print(f"\tCURRENT HEALTH: {self.game_state['health'][0]}")
-            print(f"\tCURRENT ENEMY HEALTH: {self.game_state['enemy_health'][0]}")
+            print(f"CURRENT RUN: {self.game_state['current_run']}")
+            print(f"CURRENT RUN REWARD: {round(self.game_state['run_reward_movement'] + self.game_state['run_reward_fightinput'], 2)}")
+            print(f"CURRENT RUN PREDICTED ACTIONS: {self.game_state['run_predicted_actions']}")
+            print(f"CURRENT HEALTH: {self.game_state['health'][0]}")
+            print(f"CURRENT ENEMY HEALTH: {self.game_state['enemy_health'][0]}")
             print("")
-            print(f"\tLAST RUN DURATION: {self.game_state['last_run_duration']} seconds")
+            print(f"LAST RUN DURATION: {self.game_state['last_run_duration']} seconds")
 
             print("")
-            print(f"\tRECORD TIME ALIVE: {self.game_state['record_time_alive'].get('value')} seconds (Run {self.game_state['record_time_alive'].get('run')}, {'Predicted' if self.game_state['record_time_alive'].get('predicted') else 'Training'}, Boss HP {self.game_state['record_time_alive'].get('enemy_hp')})")
-            print(f"\tRECORD ENEMY HP: {self.game_state['record_enemy_hp'].get('value')} (Run {self.game_state['record_enemy_hp'].get('run')}, {'Predicted' if self.game_state['record_enemy_hp'].get('predicted') else 'Training'}, Time Alive {self.game_state['record_enemy_hp'].get('time_alive')} seconds)")
+            print(f"RECORD TIME ALIVE: {self.game_state['record_time_alive'].get('value')} seconds (Run {self.game_state['record_time_alive'].get('run')}, {'Predicted' if self.game_state['record_time_alive'].get('predicted') else 'Training'}, Boss HP {self.game_state['record_time_alive'].get('enemy_hp')})")
+            print(f"RECORD ENEMY HP: {self.game_state['record_enemy_hp'].get('value')} (Run {self.game_state['record_enemy_hp'].get('run')}, {'Predicted' if self.game_state['record_enemy_hp'].get('predicted') else 'Training'}, Time Alive {self.game_state['record_enemy_hp'].get('time_alive')} seconds)")
             print("")
 
-            print(f"\tRANDOM AVERAGE TIME ALIVE: {self.game_state['random_time_alive']} seconds")
-            print(f"\tRANDOM AVERAGE ENEMY HP: {self.game_state['random_enemy_hp']}")
+            print(f"RANDOM AVERAGE TIME ALIVE: {self.game_state['random_time_alive']} seconds")
+            print(f"RANDOM AVERAGE ENEMY HP: {self.game_state['random_enemy_hp']}")
 
             self.dqn_movement.pick_action()
             self.dqn_movement.generate_action()
@@ -320,7 +342,7 @@ class SerpentRoboGameAgent(GameAgent):
             fightinput_keys = self.dqn_fightinput.get_input_values()
 
             print("")
-            print("\t" + " + ".join(list(map(lambda k: self.key_mapping.get(k.name), movement_keys + fightinput_keys))))
+            print("" + " + ".join(list(map(lambda k: self.key_mapping.get(k.name), movement_keys + fightinput_keys))))
 
             self.input_controller.handle_keys(movement_keys + fightinput_keys)
 
@@ -369,7 +391,7 @@ class SerpentRoboGameAgent(GameAgent):
         self.game_state["fightstarted"] = None
         self.input_controller.handle_keys([])
         self.game_state["current_run"] += 1
-        if (self.game_state['current_run'] % 5 == 0):
+        if (self.game_state['current_run'] % 1 == 0):
             self.handle_fight_training(game_frame)
         else:
             self.handle_retry_button(game_frame)
@@ -416,8 +438,8 @@ class SerpentRoboGameAgent(GameAgent):
             for i in range(16):
                 serpent.utilities.clear_terminal()
                 print("")
-                print(f"\tTRAINING ON MINI-BATCHES: {i + 1}/16")
-                print(f"\tNEXT RUN: {self.game_state['current_run'] + 1} {'- AI RUN' if (self.game_state['current_run'] + 1) % 20 == 0 else ''}")
+                print(f"TRAINING ON MINI-BATCHES: {i + 1}/16")
+                print(f"NEXT RUN: {self.game_state['current_run'] + 1} {'- AI RUN' if (self.game_state['current_run'] + 1) % 20 == 0 else ''}")
 
                 self.dqn_movement.train_on_mini_batch()
                 self.dqn_fightinput.train_on_mini_batch()
@@ -442,6 +464,6 @@ class SerpentRoboGameAgent(GameAgent):
                 self.dqn_fightinput.enter_train_mode()
 
 
-        print("\tRestarting Fight")
+        print("Restarting Fight")
         time.sleep(1)
         self.handle_retry_button(game_frame)

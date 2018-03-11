@@ -3,7 +3,7 @@ import serpent.cv
 import cv2
 
 def readhp (p1hp_frame, p2hp_frame):
-    color_almostblack = np.array([60,14,30])
+    color_almostblack = np.array([1,0,0])
     color_white = np.array([255,255,255])
 
     p1hp_frame_big = cv2.resize(p1hp_frame,None,fx=1, fy=10, interpolation = cv2.INTER_LINEAR)
