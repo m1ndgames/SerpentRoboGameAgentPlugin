@@ -32,7 +32,6 @@ import skimage.segmentation
 import skimage.color
 
 from datetime import datetime
-#from .helpers.frame_processing import readhp
 from .helpers.memory import readhp
 
 class SerpentRoboGameAgent(GameAgent):
@@ -149,6 +148,7 @@ class SerpentRoboGameAgent(GameAgent):
 		self.enemy_health = collections.deque(np.full((8,), self.enemy_hp_mapping[self.enemy]), maxlen=8)
 
 		self.multiplier_damage = 0
+		self.enemy_multiplier_damage = 0
 
 		self.enemy_skull_image = None
 
@@ -169,9 +169,6 @@ class SerpentRoboGameAgent(GameAgent):
 		retrybutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTMENU_RETRY'], game_frame=game_frame)
 		backbutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_BACKBUTTON'], game_frame=game_frame)
 
-		# reads hp from frame
-		p1hp_frame = serpent.cv.extract_region_from_image(game_frame.frame, self.game.screen_regions["P1_HP"])
-		p2hp_frame = serpent.cv.extract_region_from_image(game_frame.frame, self.game.screen_regions["P2_HP"])
 		(self.p1hp, self.p2hp) = readhp()
 		self.health.appendleft(self.p1hp)
 		self.enemy_health.appendleft(self.p2hp)
@@ -217,10 +214,19 @@ class SerpentRoboGameAgent(GameAgent):
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
 		time.sleep(1)
 
-	def handle_backbutton(self, game_frame):
-		print("Pressing Select")
-		self.input_controller.tap_key(KeyboardKey.KEY_M)
-		time.sleep(1)
+	def handle_retry_button(self, game_frame):
+		if (self.fightcount % 5 == 0):
+			print("Changing opponent")
+			time.sleep(1)
+			self.input_controller.tap_key(KeyboardKey.KEY_S)
+			time.sleep(1)
+			self.input_controller.tap_key(KeyboardKey.KEY_J)
+			time.sleep(1)
+		else:
+			print("Restarting Fight")
+			time.sleep(1)
+			self.input_controller.tap_key(KeyboardKey.KEY_J)
+			time.sleep(1)	
 
 	def handle_menu_title(self, game_frame):
 		print("Pressing Start")
@@ -232,31 +238,32 @@ class SerpentRoboGameAgent(GameAgent):
 		time.sleep(2)
 
 	def handle_player_select(self, game_frame):
+		time.sleep(1)
 		print("Choosing one Char")
 		self.input_controller.tap_key(KeyboardKey.KEY_A)
-		time.sleep(1)
+		time.sleep(0.3)
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
-		time.sleep(1)
+		time.sleep(0.5)
 		print("Choosing Robo")
 		self.input_controller.tap_key(KeyboardKey.KEY_S)
-		time.sleep(1)
+		time.sleep(0.3)
 		self.input_controller.tap_key(KeyboardKey.KEY_S)
-		time.sleep(1)
+		time.sleep(0.3)
 		self.input_controller.tap_key(KeyboardKey.KEY_D)
-		time.sleep(1)
+		time.sleep(0.3)
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
-		time.sleep(1)
+		time.sleep(0.5)
 		print("Choosing one CPU Char")
 		self.input_controller.tap_key(KeyboardKey.KEY_A)
-		time.sleep(1)
+		time.sleep(0.3)
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
-		time.sleep(1)
+		time.sleep(0.3)
 		print("Choosing Random CPU Char")
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
-		time.sleep(2)
+		time.sleep(0.3)
 		print("Starting Game")
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
-		time.sleep(2)
+		time.sleep(1)
 
 	def handle_menu_select(self, game_frame):
 		menu_selector = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_SINGLEPLAY'], game_frame=game_frame)
@@ -265,9 +272,9 @@ class SerpentRoboGameAgent(GameAgent):
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
-			time.sleep(1)
+			time.sleep(0.3)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
-			time.sleep(1)
+			time.sleep(0.3)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 		else:
@@ -282,7 +289,7 @@ class SerpentRoboGameAgent(GameAgent):
 		if (self.fightstarted == False):
 			return
 
-		if ((self.health[0] < 0.0) and (self.health[1] < 0.0) or (self.enemy_health[1] < 0.0) and (self.enemy_health[1] < 0.0)):
+		if ((self.health[0] == 0) and (self.health[1] == 0)) or ((self.enemy_health[0] == 0) and (self.enemy_health[1] == 0)):
 			return
 			
 		reward, is_alive, enemy_dead = self.reward_skullgirls([None, None, game_frame, None])
@@ -304,18 +311,16 @@ class SerpentRoboGameAgent(GameAgent):
 
 		self.printer.add(f"Observation Count: {self.observation_count}")
 		self.printer.add(f"Episode Observation Count: {self.episode_observation_count}")
-		self.printer.add(f"Current Batch Size: {self.ppo_agent.agent.batch_count}")
-		self.printer.add(f"Current Round: {self.fightcount}")
-		self.printer.add(f"Take: {self.take}")
-		self.printer.add(f"HP P1: {int(self.p1hp)}")
-		self.printer.add(f"HP P2: {int(self.p2hp)}")
-		self.printer.add("")
+		self.printer.add(f"Current Batch Size: {self.ppo_agent.agent.batch_count}/{self.ppo_agent.agent.batch_size}")
+		self.printer.add(f"Current Round: {self.fightcount} - Take: {self.take}")
+		self.printer.add(f"")
+		self.printer.add(f"HP P1: {self.p1hp} - Damage Multiplier: {self.multiplier_damage}")
+		self.printer.add(f"HP P2: {self.p2hp} - Enemy Damage Multiplier: {self.enemy_multiplier_damage}")
+		self.printer.add(f"")
 		self.printer.add(f"Run Reward: {round(self.run_reward, 2)}")
-		self.printer.add("")
 		self.printer.add(f"Average Rewards (Last 10 Runs): {round(self.average_reward_10, 2)}")
 		self.printer.add(f"Average Rewards (Last 100 Runs): {round(self.average_reward_100, 2)}")
 		self.printer.add(f"Average Rewards (Last 1000 Runs): {round(self.average_reward_1000, 2)}")
-		self.printer.add("")
 		self.printer.add(f"Top Run Reward: {round(self.top_reward, 2)} (Run #{self.top_reward_run})")
 		self.printer.add("")
 		enemy_hp_percent = round((self.average_enemy_hp_10 / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
@@ -324,10 +329,8 @@ class SerpentRoboGameAgent(GameAgent):
 		self.printer.add(f"Average Enemy HP (Last 100 Runs): {round(self.average_enemy_hp_100, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
 		enemy_hp_percent = round((self.average_enemy_hp_1000 / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
 		self.printer.add(f"Average Enemy HP (Last 1000 Runs): {round(self.average_enemy_hp_1000, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
-		self.printer.add("")
 		enemy_hp_percent = round((self.previous_enemy_hp / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
 		self.printer.add(f"Previous Run Enemy HP: {round(self.previous_enemy_hp, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
-		self.printer.add("")
 		enemy_hp_percent = round((self.best_enemy_hp / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
 		self.printer.add(f"Best Enemy HP: {round(self.best_enemy_hp, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left) (Run #{self.best_enemy_hp_run})")
 		self.printer.add("")
@@ -353,10 +356,36 @@ class SerpentRoboGameAgent(GameAgent):
 		self.death_check = True
 		self.fightstarted = False
 		self.input_controller.handle_keys([])
+		if (self.ppo_agent.agent.batch_count < (self.ppo_agent.agent.batch_size - 1)):
+			self.ppo_agent.observe(reward, terminal=(not is_alive or boss_dead))
+			return
+		
 		self.fightcount += 1
+		time.sleep(0.5)
 		self.handle_fight_training(game_frame)
 
+
 	def reward_skullgirls(self, frames, **kwargs):
+		reward = 0
+		is_alive = self.health[0] + self.health[1]
+
+		if is_alive:
+			if self.health[0] < self.health[1]:
+				self.multiplier_damage = 0
+				return 0, True, False
+			elif self.enemy_health[0] < self.enemy_health[1]:
+				self.multiplier_damage += 0.02
+
+				if self.multiplier_damage > 1:
+					self.multiplier_damage = 1
+
+				return (1 * self.multiplier_damage) + 0.001, True, False
+			else:
+				return 0, True, False
+		else:
+			return 0, False, False
+
+	def reward_skullgirls_bak(self, frames, **kwargs):
 		reward = 0
 		is_alive = self.health[0] + self.health[1]
 
@@ -372,13 +401,11 @@ class SerpentRoboGameAgent(GameAgent):
 
 				return (1 * self.multiplier_damage) + 0.001, True, False
 			else:
-				if self.enemy_health[0] < 20.0 and self._is_enemy_dead(frames[-2]):
-					return 1, True, True
-
-				return 0.001, True, False
+				return 0.002, True, False
 		else:
 			return 0, False, False
 
+			
 	def dump_metadata(self):
 		metadata = dict(
 			started_at=self.started_at,
@@ -436,11 +463,9 @@ class SerpentRoboGameAgent(GameAgent):
 		self.printer.flush()
 		self.printer.add("")
 		self.printer.add("Updating Model With New Data... ")
-		self.printer.flush()
 		self.analytics_client.track(event_key="RUN_END", data=dict(run=self.run_count))
 		reward = 0
 		is_alive = False
-		self.printer.flush()
 		self.run_count += 1
 
 		self.reward_10.appendleft(self.run_reward)
@@ -487,6 +512,7 @@ class SerpentRoboGameAgent(GameAgent):
 		self.enemy_health = collections.deque(np.full((8,), self.enemy_hp_mapping[self.enemy]), maxlen=8)
 
 		self.multiplier_damage = 0
+		self.enemy_multiplier_damage = 0
 
 		self.performed_inputs.clear()
 
@@ -494,6 +520,14 @@ class SerpentRoboGameAgent(GameAgent):
 
 		self.episode_started_at = time.time()
 		self.episode_observation_count = 0
-		time.sleep(1)
 		self.take = 1
+		self.printer.flush()
+		time.sleep(2)
 		self.handle_retry_button(game_frame)
+
+	def _is_enemy_dead(self, game_frame):
+		is_dead = False
+		if (self.enemy_health[0] == 0):
+			is_dead = True
+
+		return is_dead
