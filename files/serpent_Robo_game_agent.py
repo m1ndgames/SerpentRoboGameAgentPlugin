@@ -1,28 +1,15 @@
 from serpent.game_agent import GameAgent
-
-from serpent.frame_grabber import FrameGrabber
-from serpent.sprite_locator import SpriteLocator
 from serpent.input_controller import KeyboardKey
-sprite_locator = SpriteLocator()
-
+from serpent.sprite_locator import SpriteLocator
+from serpent.frame_grabber import FrameGrabber
 from serpent.config import config
-#from serpent.visual_debugger.visual_debugger import VisualDebugger
+import serpent.utilities
+from serpent.machine_learning.reinforcement_learning.ddqn import DDQN
+from serpent.machine_learning.reinforcement_learning.keyboard_mouse_action_space import KeyboardMouseActionSpace
+sprite_locator = SpriteLocator()
 import serpent.cv
-
-from .helpers.terminal_printer import TerminalPrinter
-from .helpers.ppo import SerpentPPO
-
-import itertools
-import collections
-
 import time
-import os
-import pickle
-import subprocess
-import shlex
-import random
-import numpy as np
-
+import cv2
 import skimage.io
 import skimage.filters
 import skimage.morphology
@@ -30,135 +17,106 @@ import skimage.measure
 import skimage.draw
 import skimage.segmentation
 import skimage.color
-
+import os
+import gc
 from datetime import datetime
+import collections
+import numpy as np
 from .helpers.memory import readhp
 
 class SerpentRoboGameAgent(GameAgent):
 	def __init__(self, **kwargs):
 		super().__init__(**kwargs)
+
 		self.frame_handlers["PLAY"] = self.handle_play
+
 		self.frame_handler_setups["PLAY"] = self.setup_play
+
 		self.sprite_locator = SpriteLocator()
+
 		self.game_state = None
-		self.printer = TerminalPrinter()
- 
+		self._reset_game_state()
+
 	def setup_play(self):
-		self.first_run = True
-
-		self.enemy = "P2"
-		self.enemy_hp_mapping = {
-			"P2": 15500
+		input_mapping = {
+			"W": [KeyboardKey.KEY_W],
+			"A": [KeyboardKey.KEY_A],
+			"S": [KeyboardKey.KEY_S],
+			"D": [KeyboardKey.KEY_D],
+			"WA": [KeyboardKey.KEY_W, KeyboardKey.KEY_A],
+			"WD": [KeyboardKey.KEY_W, KeyboardKey.KEY_D],
+			"SA": [KeyboardKey.KEY_S, KeyboardKey.KEY_A],
+			"SD": [KeyboardKey.KEY_S, KeyboardKey.KEY_D],
+			"J": [KeyboardKey.KEY_J],
+			"K": [KeyboardKey.KEY_K],
+			"L": [KeyboardKey.KEY_L],
+			"U": [KeyboardKey.KEY_U],
+			"I": [KeyboardKey.KEY_I],
+			"O": [KeyboardKey.KEY_O],
+			"JU": [KeyboardKey.KEY_J, KeyboardKey.KEY_U],
+			"KI": [KeyboardKey.KEY_K, KeyboardKey.KEY_I],
+			"LO": [KeyboardKey.KEY_L, KeyboardKey.KEY_O],
+			"N": [KeyboardKey.KEY_N],
+			"M": [KeyboardKey.KEY_M],
+			"NONE": []
 		}
 
-		move_inputs = {
-			"MOVE UP": [KeyboardKey.KEY_W],
-			"MOVE LEFT": [KeyboardKey.KEY_A],
-			"MOVE DOWN": [KeyboardKey.KEY_S],
-			"MOVE RIGHT": [KeyboardKey.KEY_D],
-			"MOVE TOP-LEFT": [KeyboardKey.KEY_W, KeyboardKey.KEY_A],
-			"MOVE TOP-RIGHT": [KeyboardKey.KEY_W, KeyboardKey.KEY_D],
-			"MOVE DOWN-LEFT": [KeyboardKey.KEY_S, KeyboardKey.KEY_A],
-			"MOVE DOWN-RIGHT": [KeyboardKey.KEY_S, KeyboardKey.KEY_D],
-			"DON'T MOVE": []
+		self.key_mapping = {
+			KeyboardKey.KEY_W.name: "MOVE UP",
+			KeyboardKey.KEY_A.name: "MOVE LEFT",
+			KeyboardKey.KEY_S.name: "MOVE DOWN",
+			KeyboardKey.KEY_D.name: "MOVE RIGHT",
+			KeyboardKey.KEY_J.name: "LIGHT PUNCH",
+			KeyboardKey.KEY_K.name: "MEDIUM PUNCH",
+			KeyboardKey.KEY_L.name: "HARD PUNCH",
+			KeyboardKey.KEY_U.name: "LIGHT KICK",
+			KeyboardKey.KEY_I.name: "MEDIUM KICK",
+			KeyboardKey.KEY_O.name: "HARD KICK",
+			KeyboardKey.KEY_N.name: "START",
+			KeyboardKey.KEY_M.name: "SELECT"
 		}
 
-		shoot_inputs = {
-			"LP": [KeyboardKey.KEY_U],
-			"MP": [KeyboardKey.KEY_I],
-			"HP": [KeyboardKey.KEY_O],
-			"LK": [KeyboardKey.KEY_J],
-			"MK": [KeyboardKey.KEY_K],
-			"HK": [KeyboardKey.KEY_L],
-			"LPLK": [KeyboardKey.KEY_U, KeyboardKey.KEY_J],
-			"MPMK": [KeyboardKey.KEY_I, KeyboardKey.KEY_K],
-			"HPHK": [KeyboardKey.KEY_O, KeyboardKey.KEY_L],
-			"DON'T FIGHT": []
-		}
-
-		self.game_inputs = dict()
-		for move_label, shoot_label in itertools.product(move_inputs, shoot_inputs):
-			label = f"{move_label.ljust(20)}{shoot_label}"
-			self.game_inputs[label] = move_inputs[move_label] + shoot_inputs[shoot_label]
-
-		self.run_count = 0
-		self.run_reward = 0
-		self.fightcount = 1
-
-		self.observation_count = 0
-		self.episode_observation_count = 0
-
-		self.performed_inputs = collections.deque(list(), maxlen=8)
-
-		self.reward_10 = collections.deque(list(), maxlen=10)
-		self.reward_100 = collections.deque(list(), maxlen=100)
-		self.reward_1000 = collections.deque(list(), maxlen=1000)
-
-		self.rewards = list()
-
-		self.average_reward_10 = 0
-		self.average_reward_100 = 0
-		self.average_reward_1000 = 0
-
-		self.top_reward = 0
-		self.top_reward_run = 0
-
-		self.previous_enemy_hp = self.enemy_hp_mapping[self.enemy]
-
-		self.enemy_hp_10 = collections.deque(list(), maxlen=10)
-		self.enemy_hp_100 = collections.deque(list(), maxlen=100)
-		self.enemy_hp_1000 = collections.deque(list(), maxlen=1000)
-
-		self.average_enemy_hp_10 = self.enemy_hp_mapping[self.enemy]
-		self.average_enemy_hp_100 = self.enemy_hp_mapping[self.enemy]
-		self.average_enemy_hp_1000 = self.enemy_hp_mapping[self.enemy]
-
-		self.best_enemy_hp = self.enemy_hp_mapping[self.enemy]
-		self.best_enemy_hp_run = 0
-
-		self.death_check = False
-		self.just_relaunched = False
-		self.fightstarted = False
-		self.frame_buffer = None
-
-		self.take = 1
-		
-		self.ppo_agent = SerpentPPO(
-			frame_shape=(100, 100, 4),
-			game_inputs=self.game_inputs
+		movement_action_space = KeyboardMouseActionSpace(
+			directional_keys=["W", "A", "S", "D", "WA", "WD", "SA", "SD", "NONE"]
 		)
 
-		try:
-			self.ppo_agent.agent.restore_model(directory=os.path.join(os.getcwd(), "datasets", "skullgirls"))
-			self.restore_metadata()
-		except Exception:
-			pass
+		fightinput_action_space = KeyboardMouseActionSpace(
+			fightinput_keys=["J", "K", "L", "U", "I", "O", "JU", "KI", "LO", "NONE"]
+		)
 
-		self.analytics_client.track(event_key="INITIALIZE", data=dict(episode_rewards=[]))
+		movement_model_file_path = "datasets/fighting_movement_dqn_0_1_.h5".replace("/", os.sep)
+		self.dqn_movement = DDQN(
+			model_file_path=movement_model_file_path if os.path.isfile(movement_model_file_path) else None,
+			input_shape=(100, 100, 4),
+			input_mapping=input_mapping,
+			action_space=movement_action_space,
+			replay_memory_size=5000,
+			max_steps=1000000,
+			observe_steps=1000,
+			batch_size=32,
+			initial_epsilon=1,
+			final_epsilon=0.01,
+			override_epsilon=False
+		)
 
-		for reward in self.rewards:
-			self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=reward))
-			time.sleep(0.01)
-
-		# Warm Agent?
-		game_frame_buffer = FrameGrabber.get_frames([0, 1, 2, 3], frame_type="PIPELINE")
-		self.ppo_agent.generate_action(game_frame_buffer)
-
-		self.health = collections.deque(np.full((16,), 6), maxlen=16)
-		self.enemy_health = collections.deque(np.full((8,), self.enemy_hp_mapping[self.enemy]), maxlen=8)
-
-		self.multiplier_damage = 0
-		self.enemy_multiplier_damage = 0
-
-		self.enemy_skull_image = None
-
-		self.started_at = datetime.utcnow().isoformat()
-		self.episode_started_at = None
-
-		self.paused_at = None
+		fightinput_model_file_path = "datasets/fighting_fightinput_dqn_0_1_.h5".replace("/", os.sep)
+		self.dqn_fightinput = DDQN(
+			model_file_path=fightinput_model_file_path if os.path.isfile(fightinput_model_file_path) else None,
+			input_shape=(100, 100, 4),
+			input_mapping=input_mapping,
+			action_space=fightinput_action_space,
+			replay_memory_size=5000,
+			max_steps=1000000,
+			observe_steps=1000,
+			batch_size=32,
+			initial_epsilon=1,
+			final_epsilon=0.01,
+			override_epsilon=False
+		)
+		print("Debug: Game Started")
 
 	def handle_play(self, game_frame):
-		# various sprite locators
+		#print("Debug: Main")
 		title_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_TITLE_TEXT'], game_frame=game_frame)
 		menu_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_TEXT'], game_frame=game_frame)
 		fightmenu_select_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_FIGHTMENU_SELECT'], game_frame=game_frame)
@@ -170,21 +128,12 @@ class SerpentRoboGameAgent(GameAgent):
 		backbutton_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_BACKBUTTON'], game_frame=game_frame)
 
 		(self.p1hp, self.p2hp) = readhp()
-		self.health.appendleft(self.p1hp)
-		self.enemy_health.appendleft(self.p2hp)
-		reward, is_alive, enemy_dead = self.reward_skullgirls([None, None, game_frame, None])
+		self.game_state["health"].appendleft(self.p1hp)
+		self.game_state["enemy_health"].appendleft(self.p2hp)
 		
-		# Defines current take in fight round
-		take2_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_TAKE2'], game_frame=game_frame)
-		take3_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_TAKE3'], game_frame=game_frame)
-		if (take2_locator):
-			self.take = 2
-		elif (take3_locator):
-			self.take = 3
-			
 		if (roundstart_locator):
 			#print("Debug: roundstart_locator Locator")
-			self.fightstarted = True
+			self.game_state["fightstarted"] = True
 		elif (retrybutton_locator):
 			#print("Debug: retrybutton_locator Locator")
 			self.handle_fight_end(game_frame)
@@ -203,30 +152,30 @@ class SerpentRoboGameAgent(GameAgent):
 		elif (backbutton_locator):
 			#print("Debug: backbutton_locator Locator")
 			self.handle_backbutton(game_frame)
-		elif ((fightmenu_select_locator) and (self.fightcount != 1)):
+		elif ((fightmenu_select_locator) and (self.game_state["current_run"] != 1)):
 			#print("Debug: fightmenu_select_locator Locator")
 			self.handle_fightmenu_select(game_frame)
 		else:
 			return
 
 	def handle_retry_button(self, game_frame):
-		print("Pressing LP")
-		self.input_controller.tap_key(KeyboardKey.KEY_J)
-		time.sleep(1)
-
-	def handle_retry_button(self, game_frame):
-		if (self.fightcount % 5 == 0):
+		if (self.game_state["current_run"] % 5 == 0):
 			print("Changing opponent")
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
-			time.sleep(1)
+			time.sleep(0.5)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 		else:
 			print("Restarting Fight")
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
-			time.sleep(1)	
+			time.sleep(1)
+
+	def handle_backbutton(self, game_frame):
+		print("Pressing Select")
+		self.input_controller.tap_key(KeyboardKey.KEY_M)
+		time.sleep(1)
 
 	def handle_menu_title(self, game_frame):
 		print("Pressing Start")
@@ -265,6 +214,7 @@ class SerpentRoboGameAgent(GameAgent):
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
 		time.sleep(1)
 
+
 	def handle_menu_select(self, game_frame):
 		menu_selector = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_SINGLEPLAY'], game_frame=game_frame)
 		if (menu_selector):
@@ -272,9 +222,9 @@ class SerpentRoboGameAgent(GameAgent):
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
-			time.sleep(0.3)
+			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
-			time.sleep(0.3)
+			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 		else:
@@ -282,252 +232,255 @@ class SerpentRoboGameAgent(GameAgent):
 			time.sleep(1)
 
 	def handle_fight(self, game_frame):
-		timeout_locator = sprite_locator.locate(sprite=self.game.sprites['SPRITE_TIMEOUT'], game_frame=game_frame)
-		if (timeout_locator):
+		gc.disable()
+
+		if not (self.game_state["fightstarted"]):
 			return
 
-		if (self.fightstarted == False):
+		if ((self.game_state["health"][0] == 0) and (self.game_state["health"][1] == 0) or (self.game_state["enemy_health"][0] == 0) and (self.game_state["enemy_health"][1] == 0)):
 			return
 
-		if ((self.health[0] == 0) and (self.health[1] == 0)) or ((self.enemy_health[0] == 0) and (self.enemy_health[1] == 0)):
-			return
+		if self.dqn_movement.first_run:
+			self.dqn_movement.first_run = False
+			self.dqn_fightinput.first_run = False
+			return None
+
+		if self.dqn_movement.frame_stack is None:
+			pipeline_game_frame = FrameGrabber.get_frames(
+				[0],
+				frame_shape=(self.game.frame_height, self.game.frame_width),
+				frame_type="PIPELINE",
+				dtype="float64"
+			).frames[0]
+
+			self.dqn_movement.build_frame_stack(pipeline_game_frame.frame)
+			self.dqn_fightinput.frame_stack = self.dqn_movement.frame_stack
+		else:
+			game_frame_buffer = FrameGrabber.get_frames(
+				[0, 4, 8, 12],
+				frame_shape=(self.game.frame_height, self.game.frame_width),
+				frame_type="PIPELINE",
+				dtype="float64"
+			)
+
+			if self.dqn_movement.mode == "TRAIN":
+				reward_movement, reward_fightinput = self._calculate_reward()
+
+				self.game_state["run_reward_movement"] += reward_movement
+				self.game_state["run_reward_fightinput"] += reward_fightinput
+
+				self.dqn_movement.append_to_replay_memory(
+					game_frame_buffer,
+					reward_movement,
+					terminal=self.game_state["health"] == 0
+				)
+
+				self.dqn_fightinput.append_to_replay_memory(
+					game_frame_buffer,
+					reward_fightinput,
+					terminal=self.game_state["health"] == 0
+				)
+
+				# Every 2000 steps, save latest weights to disk
+				if self.dqn_movement.current_step % 2000 == 0:
+					self.dqn_movement.save_model_weights(
+						file_path_prefix=f"datasets/fighting_movement"
+					)
+
+					self.dqn_fightinput.save_model_weights(
+						file_path_prefix=f"datasets/fighting_fightinput"
+					)
+
+				# Every 20000 steps, save weights checkpoint to disk
+				if self.dqn_movement.current_step % 20000 == 0:
+					self.dqn_movement.save_model_weights(
+						file_path_prefix=f"datasets/fighting_movement",
+						is_checkpoint=True
+					)
+
+					self.dqn_fightinput.save_model_weights(
+						file_path_prefix=f"datasets/fighting_fightinput",
+						is_checkpoint=True
+					)
+			elif self.dqn_movement.mode == "RUN":
+				self.dqn_movement.update_frame_stack(game_frame_buffer)
+				self.dqn_fightinput.update_frame_stack(game_frame_buffer)
+
+			run_time = datetime.now() - self.started_at
+			serpent.utilities.clear_terminal()
+			print("")
+			print(f"SESSION RUN TIME: {run_time.days} days, {run_time.seconds // 3600} hours, {(run_time.seconds // 60) % 60} minutes, {run_time.seconds % 60} seconds")
+
+			print("")
+			print("MOVEMENT NEURAL NETWORK:\n")
+			self.dqn_movement.output_step_data()
+
+			print("")
+			print("FIGHT NEURAL NETWORK:\n")
+			self.dqn_fightinput.output_step_data()
+
+			print("")
+			print(f"CURRENT RUN: {self.game_state['current_run']}")
+			print(f"CURRENT RUN REWARD: {round(self.game_state['run_reward_movement'] + self.game_state['run_reward_fightinput'], 2)}")
+			print(f"CURRENT RUN PREDICTED ACTIONS: {self.game_state['run_predicted_actions']}")
+			print(f"CURRENT HEALTH: {self.game_state['health'][0]}")
+			print(f"CURRENT ENEMY HEALTH: {self.game_state['enemy_health'][0]}")
+			print("")
+			print(f"LAST RUN DURATION: {self.game_state['last_run_duration']} seconds")
+
+			print("")
+			print(f"RECORD TIME ALIVE: {self.game_state['record_time_alive'].get('value')} seconds (Run {self.game_state['record_time_alive'].get('run')}, {'Predicted' if self.game_state['record_time_alive'].get('predicted') else 'Training'}, Boss HP {self.game_state['record_time_alive'].get('enemy_hp')})")
+			print(f"RECORD ENEMY HP: {self.game_state['record_enemy_hp'].get('value')} (Run {self.game_state['record_enemy_hp'].get('run')}, {'Predicted' if self.game_state['record_enemy_hp'].get('predicted') else 'Training'}, Time Alive {self.game_state['record_enemy_hp'].get('time_alive')} seconds)")
+			print("")
+
+			print(f"RANDOM AVERAGE TIME ALIVE: {self.game_state['random_time_alive']} seconds")
+			print(f"RANDOM AVERAGE ENEMY HP: {self.game_state['random_enemy_hp']}")
+
+			self.dqn_movement.pick_action()
+			self.dqn_movement.generate_action()
+	
+			self.dqn_fightinput.pick_action(action_type=self.dqn_movement.current_action_type)
+			self.dqn_fightinput.generate_action()
+
+			movement_keys = self.dqn_movement.get_input_values()
+			fightinput_keys = self.dqn_fightinput.get_input_values()
+
+			print("")
+			print("" + " + ".join(list(map(lambda k: self.key_mapping.get(k.name), movement_keys + fightinput_keys))))
+
+			self.input_controller.handle_keys(movement_keys + fightinput_keys)
+
+			if self.dqn_movement.current_action_type == "PREDICTED":
+				self.game_state["run_predicted_actions"] += 1
+
+			self.dqn_movement.erode_epsilon(factor=2)
+			self.dqn_fightinput.erode_epsilon(factor=2)
+
+			self.dqn_movement.next_step()
+			self.dqn_fightinput.next_step()
+
+			self.game_state["current_run_steps"] += 1
+
+	def _reset_game_state(self):
+		self.game_state = {
+			"health": collections.deque(np.full((8,), 6), maxlen=8),
+			"enemy_health": collections.deque(np.full((8,), 654), maxlen=8),
+			"current_run": 1,
+			"current_run_steps": 0,
+			"run_reward_movement": 0,
+			"run_reward_fightinput": 0,
+			"run_future_rewards": 0,
+			"run_predicted_actions": 0,
+			"run_timestamp": datetime.utcnow(),
+			"last_run_duration": 0,
+			"record_time_alive": dict(),
+			"record_enemy_hp": dict(),
+			"random_time_alive": None,
+			"random_time_alives": list(),
+			"random_enemy_hp": None,
+			"random_enemy_hps": list(),
+			"fightstarted": None
+		}
+
+	def _calculate_reward(self):
+		reward_movement = 0
+		reward_fightinput = 0
+
+		if self.health[0] < self.health[1]:
+			reward_movement += -0.20
+		else:
+			reward_movement += 0.10
 			
-		reward, is_alive, enemy_dead = self.reward_skullgirls([None, None, game_frame, None])
-		self.printer.add("")
-		self.printer.add(f"Stage Started At: {self.started_at}")
-		self.printer.add("")
-		if self.frame_buffer is not None:
-			self.run_reward += reward
+		if self.enemy_health[0] < self.enemy_health[1]:
+			reward_fightinput += 0.20
+		else:
+			reward_fightinput += -0.10
 
-			self.observation_count += 1
-			self.episode_observation_count += 1
-
-			self.analytics_client.track(event_key="RUN_REWARD", data=dict(reward=reward))
-
-			episode_over = self.episode_observation_count > (120 * config["SerpentSkullgirlsGamePlugin"]["fps"])
-
-
-			self.ppo_agent.observe(reward, terminal=(not is_alive or enemy_dead))
-
-		self.printer.add(f"Observation Count: {self.observation_count}")
-		self.printer.add(f"Episode Observation Count: {self.episode_observation_count}")
-		self.printer.add(f"Current Batch Size: {self.ppo_agent.agent.batch_count}/{self.ppo_agent.agent.batch_size}")
-		self.printer.add(f"Current Round: {self.fightcount} - Take: {self.take}")
-		self.printer.add(f"")
-		self.printer.add(f"HP P1: {self.p1hp} - Damage Multiplier: {self.multiplier_damage}")
-		self.printer.add(f"HP P2: {self.p2hp} - Enemy Damage Multiplier: {self.enemy_multiplier_damage}")
-		self.printer.add(f"")
-		self.printer.add(f"Run Reward: {round(self.run_reward, 2)}")
-		self.printer.add(f"Average Rewards (Last 10 Runs): {round(self.average_reward_10, 2)}")
-		self.printer.add(f"Average Rewards (Last 100 Runs): {round(self.average_reward_100, 2)}")
-		self.printer.add(f"Average Rewards (Last 1000 Runs): {round(self.average_reward_1000, 2)}")
-		self.printer.add(f"Top Run Reward: {round(self.top_reward, 2)} (Run #{self.top_reward_run})")
-		self.printer.add("")
-		enemy_hp_percent = round((self.average_enemy_hp_10 / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
-		self.printer.add(f"Average Enemy HP (Last 10 Runs): {round(self.average_enemy_hp_10, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
-		enemy_hp_percent = round((self.average_enemy_hp_100 / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
-		self.printer.add(f"Average Enemy HP (Last 100 Runs): {round(self.average_enemy_hp_100, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
-		enemy_hp_percent = round((self.average_enemy_hp_1000 / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
-		self.printer.add(f"Average Enemy HP (Last 1000 Runs): {round(self.average_enemy_hp_1000, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
-		enemy_hp_percent = round((self.previous_enemy_hp / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
-		self.printer.add(f"Previous Run Enemy HP: {round(self.previous_enemy_hp, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left)")
-		enemy_hp_percent = round((self.best_enemy_hp / self.enemy_hp_mapping[self.enemy]) * 100.0, 2)
-		self.printer.add(f"Best Enemy HP: {round(self.best_enemy_hp, 2)} / {self.enemy_hp_mapping[self.enemy]} ({enemy_hp_percent}% left) (Run #{self.best_enemy_hp_run})")
-		self.printer.add("")
-		self.printer.add("Latest Inputs:")
-		self.printer.add("")
-
-		for i in self.performed_inputs:
-			self.printer.add(i)
-
-		self.printer.flush()
-
-		self.frame_buffer = FrameGrabber.get_frames([0, 1, 2, 3], frame_type="PIPELINE")
-
-		action, label, game_input = self.ppo_agent.generate_action(self.frame_buffer)
-
-		self.performed_inputs.appendleft(label)
-		self.input_controller.handle_keys(game_input)
+		return reward_movement, reward_fightinput
+			
+	def _calculate_reward_bak(self):
+		reward_movement = 0
+		reward_fightinput = 0
+		reward_movement += (-1 if self.game_state["health"][0] < self.game_state["health"][1] else 0.05)
+		reward_fightinput += (1 if self.game_state["enemy_health"][0] < self.game_state["enemy_health"][3] else -0.05)
+		return reward_movement, reward_fightinput
 
 
 	def handle_fight_end(self, game_frame):
-		reward = 0
-		is_alive = False
-		self.death_check = True
-		self.fightstarted = False
+		self.game_state["fightstarted"] = None
 		self.input_controller.handle_keys([])
-		if (self.ppo_agent.agent.batch_count < (self.ppo_agent.agent.batch_size - 1)):
-			self.ppo_agent.observe(reward, terminal=(not is_alive or boss_dead))
+		self.game_state["current_run"] += 1
+		if (self.game_state['current_run'] % 1 == 0):
+			self.handle_fight_training(game_frame)
+		else:
+			self.handle_retry_button(game_frame)
 			return
-		
-		self.fightcount += 1
-		time.sleep(0.5)
-		self.handle_fight_training(game_frame)
-
-
-	def reward_skullgirls(self, frames, **kwargs):
-		reward = 0
-		is_alive = self.health[0] + self.health[1]
-
-		if is_alive:
-			if self.health[0] < self.health[1]:
-				self.multiplier_damage = 0
-				return 0, True, False
-			elif self.enemy_health[0] < self.enemy_health[1]:
-				self.multiplier_damage += 0.02
-
-				if self.multiplier_damage > 1:
-					self.multiplier_damage = 1
-
-				return (1 * self.multiplier_damage) + 0.001, True, False
-			else:
-				return 0, True, False
-		else:
-			return 0, False, False
-
-	def reward_skullgirls_bak(self, frames, **kwargs):
-		reward = 0
-		is_alive = self.health[0] + self.health[1]
-
-		if is_alive:
-			if self.health[0] < self.health[1]:
-				self.multiplier_damage = 0
-				return 0, True, False
-			elif self.enemy_health[0] < self.enemy_health[1]:
-				self.multiplier_damage += 0.05
-
-				if self.multiplier_damage > 1:
-					self.multiplier_damage = 1
-
-				return (1 * self.multiplier_damage) + 0.001, True, False
-			else:
-				return 0.002, True, False
-		else:
-			return 0, False, False
-
-			
-	def dump_metadata(self):
-		metadata = dict(
-			started_at=self.started_at,
-			run_count=self.run_count - 1,
-			observation_count=self.observation_count,
-			reward_10=self.reward_10,
-			reward_100=self.reward_100,
-			reward_1000=self.reward_1000,
-			rewards=self.rewards,
-			average_reward_10=self.average_reward_10,
-			average_reward_100=self.average_reward_100,
-			average_reward_1000=self.average_reward_1000,
-			top_reward=self.top_reward,
-			top_reward_run=self.top_reward_run,
-			enemy_hp_10=self.enemy_hp_10,
-			enemy_hp_100=self.enemy_hp_100,
-			enemy_hp_1000=self.enemy_hp_1000,
-			average_enemy_hp_10=self.average_enemy_hp_10,
-			average_enemy_hp_100=self.average_enemy_hp_100,
-			average_enemy_hp_1000=self.average_enemy_hp_1000,
-			best_enemy_hp=self.best_enemy_hp,
-			best_enemy_hp_run=self.best_enemy_hp_run
-		)
-
-		with open("datasets/skullgirls/metadata.json", "wb") as f:
-			f.write(pickle.dumps(metadata))
-
-	def restore_metadata(self):
-		with open("datasets/skullgirls/metadata.json", "rb") as f:
-			metadata = pickle.loads(f.read())
-
-		self.started_at = metadata["started_at"]
-		self.run_count = metadata["run_count"]
-		self.observation_count = metadata["observation_count"]
-		self.reward_10 = metadata["reward_10"]
-		self.reward_100 = metadata["reward_100"]
-		self.reward_1000 = metadata["reward_1000"]
-		self.rewards = metadata["rewards"]
-		self.average_reward_10 = metadata["average_reward_10"]
-		self.average_reward_100 = metadata["average_reward_100"]
-		self.average_reward_1000 = metadata["average_reward_1000"]
-		self.top_reward = metadata["top_reward"]
-		self.top_reward_run = metadata["top_reward_run"]
-		self.enemy_hp_10 = metadata["enemy_hp_10"]
-		self.enemy_hp_100 = metadata["enemy_hp_100"]
-		self.enemy_hp_1000 = metadata["enemy_hp_1000"]
-		self.average_enemy_hp_10 = metadata["average_enemy_hp_10"]
-		self.average_enemy_hp_100 = metadata["average_enemy_hp_100"]
-		self.average_enemy_hp_1000 = metadata["average_enemy_hp_1000"]
-		self.best_enemy_hp = metadata["best_enemy_hp"]
-		self.best_enemy_hp_run = metadata["best_enemy_hp_run"]
 
 	def handle_fight_training(self, game_frame):
-		reward, is_alive, enemy_dead = self.reward_skullgirls([None, None, game_frame, None])
-		self.printer.flush()
-		self.printer.add("")
-		self.printer.add("Updating Model With New Data... ")
-		self.analytics_client.track(event_key="RUN_END", data=dict(run=self.run_count))
-		reward = 0
-		is_alive = False
-		self.run_count += 1
+		serpent.utilities.clear_terminal()
+		timestamp = datetime.utcnow()
+		timestamp_delta = timestamp - self.game_state["run_timestamp"]
+		self.game_state["last_run_duration"] = timestamp_delta.seconds
+		gc.enable()
+		gc.collect()
+		gc.disable()
 
-		self.reward_10.appendleft(self.run_reward)
-		self.reward_100.appendleft(self.run_reward)
-		self.reward_1000.appendleft(self.run_reward)
+		if self.dqn_movement.mode in ["TRAIN", "RUN"]:
+			# Check for Records
+			if self.game_state["last_run_duration"] > self.game_state["record_time_alive"].get("value", 0):
+				self.game_state["record_time_alive"] = {
+					"value": self.game_state["last_run_duration"],
+					"run": self.game_state["current_run"],
+					"predicted": self.dqn_movement.mode == "RUN",
+					"enemy_hp": self.game_state["enemy_health"][0]
+				}
 
-		self.rewards.append(self.run_reward)
+			if self.game_state["enemy_health"][0] < self.game_state["record_enemy_hp"].get("value", 1000):
+				self.game_state["record_enemy_hp"] = {
+					"value": self.game_state["enemy_health"][0],
+					"run": self.game_state["current_run"],
+					"predicted": self.dqn_movement.mode == "RUN",
+					"time_alive": self.game_state["last_run_duration"]
+				}
+		else:
+			self.game_state["random_time_alives"].append(self.game_state["last_run_duration"])
+			self.game_state["random_enemy_hps"].append(self.game_state["enemy_health"][0])
 
-		self.average_reward_10 = float(np.mean(self.reward_10))
-		self.average_reward_100 = float(np.mean(self.reward_100))
-		self.average_reward_1000 = float(np.mean(self.reward_1000))
+			self.game_state["random_time_alive"] = np.mean(self.game_state["random_time_alives"])
+			self.game_state["random_enemy_hp"] = np.mean(self.game_state["random_enemy_hps"])
 
-		if self.run_reward > self.top_reward:
-			self.top_reward = self.run_reward
-			self.top_reward_run = self.run_count - 1
+		self.game_state["current_run_steps"] = 0
 
-			self.analytics_client.track(event_key="NEW_RECORD", data=dict(type="REWARD", value=self.run_reward, run=self.run_count - 1))
+		self.input_controller.handle_keys([])
 
-		self.analytics_client.track(event_key="EPISODE_REWARD", data=dict(reward=self.run_reward))
+		if self.dqn_movement.mode == "TRAIN":
+			for i in range(16):
+				serpent.utilities.clear_terminal()
+				print("")
+				print(f"TRAINING ON MINI-BATCHES: {i + 1}/16")
+				print(f"NEXT RUN: {self.game_state['current_run'] + 1} {'- AI RUN' if (self.game_state['current_run'] + 1) % 20 == 0 else ''}")
 
-		self.previous_enemy_hp = 0 if enemy_dead else max(list(self.enemy_health)[:4])
+				self.dqn_movement.train_on_mini_batch()
+				self.dqn_fightinput.train_on_mini_batch()
 
-		self.run_reward = 0
+		self.game_state["run_timestamp"] = datetime.utcnow()
+		self.game_state["run_reward_movement"] = 0
+		self.game_state["run_reward_fightinput"] = 0
+		self.game_state["run_predicted_actions"] = 0
+		self.game_state["health"] = collections.deque(np.full((8,), 6), maxlen=8)
+		self.game_state["enemy_health"] = collections.deque(np.full((8,), 654), maxlen=8)
 
-		self.enemy_hp_10.appendleft(self.previous_enemy_hp)
-		self.enemy_hp_100.appendleft(self.previous_enemy_hp)
-		self.enemy_hp_1000.appendleft(self.previous_enemy_hp)
+		if self.dqn_movement.mode in ["TRAIN", "RUN"]:
+			if self.game_state["current_run"] > 0 and self.game_state["current_run"] % 100 == 0:
+				self.dqn_movement.update_target_model()
+				self.dqn_fightinput.update_target_model()
 
-		self.average_enemy_hp_10 = float(np.mean(self.enemy_hp_10))
-		self.average_enemy_hp_100 = float(np.mean(self.enemy_hp_100))
-		self.average_enemy_hp_1000 = float(np.mean(self.enemy_hp_1000))
+			if self.game_state["current_run"] > 0 and self.game_state["current_run"] % 20 == 0:
+				self.dqn_movement.enter_run_mode()
+				self.dqn_fightinput.enter_run_mode()
+			else:
+				self.dqn_movement.enter_train_mode()
+				self.dqn_fightinput.enter_train_mode()
 
-		if (enemy_dead or self.previous_enemy_hp > 0) and self.previous_enemy_hp < self.best_enemy_hp:
-			self.best_enemy_hp = self.previous_enemy_hp
-			self.best_enemy_hp_run = self.run_count - 1
 
-			self.analytics_client.track(event_key="NEW_RECORD", data=dict(type="BOSS_HP", value=self.previous_enemy_hp, run=self.run_count - 1))
-
-		if not self.run_count % 10:
-			self.ppo_agent.agent.save_model(directory=os.path.join(os.getcwd(), "datasets", "skullgirls", "ppo_model"), append_timestep=False)
-			self.dump_metadata()
-
-		self.health = collections.deque(np.full((16,), 6), maxlen=16)
-		self.enemy_health = collections.deque(np.full((8,), self.enemy_hp_mapping[self.enemy]), maxlen=8)
-
-		self.multiplier_damage = 0
-		self.enemy_multiplier_damage = 0
-
-		self.performed_inputs.clear()
-
-		self.frame_buffer = None
-
-		self.episode_started_at = time.time()
-		self.episode_observation_count = 0
-		self.take = 1
-		self.printer.flush()
-		time.sleep(2)
 		self.handle_retry_button(game_frame)
-
-	def _is_enemy_dead(self, game_frame):
-		is_dead = False
-		if (self.enemy_health[0] == 0):
-			is_dead = True
-
-		return is_dead
