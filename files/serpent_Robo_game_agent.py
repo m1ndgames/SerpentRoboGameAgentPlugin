@@ -23,6 +23,9 @@ from datetime import datetime
 import collections
 import numpy as np
 from .helpers.memory import readhp
+from colorama import init
+init()
+from colorama import Fore, Style
 
 class SerpentRoboGameAgent(GameAgent):
 	def __init__(self, **kwargs):
@@ -159,26 +162,30 @@ class SerpentRoboGameAgent(GameAgent):
 			return
 
 	def handle_retry_button(self, game_frame):
-		if (self.game_state["current_run"] % 5 == 0):
-			print("Changing opponent")
+		if (self.game_state["current_run"] % 25 == 0):
+			print(Fore.RED + 'Changing Opponent')
+			print(Style.RESET_ALL)
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
 			time.sleep(0.5)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 		else:
-			print("Restarting Fight")
+			print(Fore.RED + 'Restarting Fight')
+			print(Style.RESET_ALL)
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 
 	def handle_backbutton(self, game_frame):
-		print("Pressing Select")
+		print(Fore.RED + 'Pressing Select')
+		print(Style.RESET_ALL)
 		self.input_controller.tap_key(KeyboardKey.KEY_M)
 		time.sleep(1)
 
 	def handle_menu_title(self, game_frame):
-		print("Pressing Start")
+		print(Fore.RED + 'Pressing Start')
+		print(Style.RESET_ALL)
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
 		time.sleep(2)
 
@@ -188,7 +195,7 @@ class SerpentRoboGameAgent(GameAgent):
 
 	def handle_player_select(self, game_frame):
 		time.sleep(1)
-		print("Choosing one Char")
+		print(Fore.RED + 'Choosing one Char')
 		self.input_controller.tap_key(KeyboardKey.KEY_A)
 		time.sleep(0.3)
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
@@ -211,6 +218,7 @@ class SerpentRoboGameAgent(GameAgent):
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
 		time.sleep(0.3)
 		print("Starting Game")
+		print(Style.RESET_ALL)
 		self.input_controller.tap_key(KeyboardKey.KEY_J)
 		time.sleep(1)
 
@@ -218,7 +226,8 @@ class SerpentRoboGameAgent(GameAgent):
 	def handle_menu_select(self, game_frame):
 		menu_selector = sprite_locator.locate(sprite=self.game.sprites['SPRITE_MAINMENU_SINGLEPLAY'], game_frame=game_frame)
 		if (menu_selector):
-			print("Starting Singleplayer Mode")
+			print(Fore.RED + 'Starting Singleplayer Mode')
+			print(Style.RESET_ALL)
 			self.input_controller.tap_key(KeyboardKey.KEY_J)
 			time.sleep(1)
 			self.input_controller.tap_key(KeyboardKey.KEY_S)
@@ -309,32 +318,31 @@ class SerpentRoboGameAgent(GameAgent):
 			run_time = datetime.now() - self.started_at
 			serpent.utilities.clear_terminal()
 			print("")
+			print(Fore.YELLOW)
+			print(Style.BRIGHT)
 			print(f"SESSION RUN TIME: {run_time.days} days, {run_time.seconds // 3600} hours, {(run_time.seconds // 60) % 60} minutes, {run_time.seconds % 60} seconds")
-
+			print(Style.RESET_ALL)
 			print("")
+			print(Fore.GREEN)
+			print(Style.BRIGHT)
 			print("MOVEMENT NEURAL NETWORK:\n")
 			self.dqn_movement.output_step_data()
-
 			print("")
 			print("FIGHT NEURAL NETWORK:\n")
 			self.dqn_fightinput.output_step_data()
-
+			print(Style.RESET_ALL)
 			print("")
+			print(Style.BRIGHT)
 			print(f"CURRENT RUN: {self.game_state['current_run']}")
-			print(f"CURRENT RUN REWARD: {round(self.game_state['run_reward_movement'] + self.game_state['run_reward_fightinput'], 2)}")
-			print(f"CURRENT RUN PREDICTED ACTIONS: {self.game_state['run_predicted_actions']}")
+			print(f"LAST RUN DURATION: {self.game_state['last_run_duration']} seconds")
+			print("")
+			print(f"CURRENT RUN REWARD: {round(self.game_state['run_reward_movement'] + self.game_state['run_reward_fightinput'], 4)}")
+			print(f"COMBO MULTIPLICATOR: {self.game_state['multiplier_damage']}")
 			print(f"CURRENT HEALTH: {self.game_state['health'][0]}")
 			print(f"CURRENT ENEMY HEALTH: {self.game_state['enemy_health'][0]}")
 			print("")
-			print(f"LAST RUN DURATION: {self.game_state['last_run_duration']} seconds")
-
-			print("")
-			print(f"RECORD TIME ALIVE: {self.game_state['record_time_alive'].get('value')} seconds (Run {self.game_state['record_time_alive'].get('run')}, {'Predicted' if self.game_state['record_time_alive'].get('predicted') else 'Training'}, Boss HP {self.game_state['record_time_alive'].get('enemy_hp')})")
-			print(f"RECORD ENEMY HP: {self.game_state['record_enemy_hp'].get('value')} (Run {self.game_state['record_enemy_hp'].get('run')}, {'Predicted' if self.game_state['record_enemy_hp'].get('predicted') else 'Training'}, Time Alive {self.game_state['record_enemy_hp'].get('time_alive')} seconds)")
-			print("")
-
-			print(f"RANDOM AVERAGE TIME ALIVE: {self.game_state['random_time_alive']} seconds")
-			print(f"RANDOM AVERAGE ENEMY HP: {self.game_state['random_enemy_hp']}")
+			print(f"CURRENT RUN PREDICTED ACTIONS: {self.game_state['run_predicted_actions']}")
+			print(Style.RESET_ALL)
 
 			self.dqn_movement.pick_action()
 			self.dqn_movement.generate_action()
@@ -346,8 +354,11 @@ class SerpentRoboGameAgent(GameAgent):
 			fightinput_keys = self.dqn_fightinput.get_input_values()
 
 			print("")
+			print(Fore.GREEN)
+			print(Style.BRIGHT)
 			print("" + " + ".join(list(map(lambda k: self.key_mapping.get(k.name), movement_keys + fightinput_keys))))
-
+			print(Style.RESET_ALL)
+	
 			self.input_controller.handle_keys(movement_keys + fightinput_keys)
 
 			if self.dqn_movement.current_action_type == "PREDICTED":
@@ -379,42 +390,55 @@ class SerpentRoboGameAgent(GameAgent):
 			"random_time_alives": list(),
 			"random_enemy_hp": None,
 			"random_enemy_hps": list(),
-			"fightstarted": None
+			"fightstarted": None,
+			"multiplier_damage": 0
 		}
 
 	def _calculate_reward(self):
 		reward_movement = 0
 		reward_fightinput = 0
 
-		if self.health[0] < self.health[1]:
-			reward_movement += -0.20
-		else:
-			reward_movement += 0.10
-			
-		if self.enemy_health[0] < self.enemy_health[1]:
-			reward_fightinput += 0.20
-		else:
+		# getting hit by enemy
+		if self.game_state["health"][0] < self.game_state["health"][1]:
+			self.game_state["multiplier_damage"] = 0
+			reward_movement += -0.10
 			reward_fightinput += -0.10
+		else:
+			reward_movement += 0.05
 
-		return reward_movement, reward_fightinput
+		# hitting the enemy
+		if self.game_state["enemy_health"][0] < self.game_state["enemy_health"][1]:
+			# combo multiplicator
+			self.game_state["multiplier_damage"] += 0.20
+			if self.game_state["multiplier_damage"] > 1:
+				self.game_state["multiplier_damage"] = 1
+				
+			# check how much dmg the attack did and add 0.05 per class to reward
+			if (self.game_state["enemy_health"][1] - self.game_state["enemy_health"][0]) > 150: # light
+				reward_fightinput += 0.05
+			if (self.game_state["enemy_health"][1] - self.game_state["enemy_health"][0]) > 500: # medium
+				reward_fightinput += 0.05
+			if (self.game_state["enemy_health"][1] - self.game_state["enemy_health"][0]) > 750: # hard
+				reward_fightinput += 0.05
 			
-	def _calculate_reward_bak(self):
-		reward_movement = 0
-		reward_fightinput = 0
-		reward_movement += (-1 if self.game_state["health"][0] < self.game_state["health"][1] else 0.05)
-		reward_fightinput += (1 if self.game_state["enemy_health"][0] < self.game_state["enemy_health"][3] else -0.05)
-		return reward_movement, reward_fightinput
+			# calculate reward
+			reward_fightinput += (1 * self.game_state["multiplier_damage"])
+		else:
+			reward_fightinput += -0.05
+			reward_movement += -0.01
 
+		# enemy wasnt hit for 5 rounds
+		if self.game_state["enemy_health"][0] == self.game_state["enemy_health"][5]:
+			self.game_state["multiplier_damage"] = 0
+
+		# return rewards
+		return reward_movement, reward_fightinput
 
 	def handle_fight_end(self, game_frame):
 		self.game_state["fightstarted"] = None
 		self.input_controller.handle_keys([])
 		self.game_state["current_run"] += 1
-		if (self.game_state['current_run'] % 1 == 0):
-			self.handle_fight_training(game_frame)
-		else:
-			self.handle_retry_button(game_frame)
-			return
+		self.handle_fight_training(game_frame)
 
 	def handle_fight_training(self, game_frame):
 		serpent.utilities.clear_terminal()
@@ -457,9 +481,12 @@ class SerpentRoboGameAgent(GameAgent):
 			for i in range(16):
 				serpent.utilities.clear_terminal()
 				print("")
+				print(Fore.GREEN)
+				print(Style.BRIGHT)
 				print(f"TRAINING ON MINI-BATCHES: {i + 1}/16")
-				print(f"NEXT RUN: {self.game_state['current_run'] + 1} {'- AI RUN' if (self.game_state['current_run'] + 1) % 20 == 0 else ''}")
-
+				print(f"NEXT RUN: {self.game_state['current_run'] + 1} {'- AI RUN' if (self.game_state['current_run'] + 1) % 25 == 0 else ''}")
+				print(Style.RESET_ALL)
+				
 				self.dqn_movement.train_on_mini_batch()
 				self.dqn_fightinput.train_on_mini_batch()
 
